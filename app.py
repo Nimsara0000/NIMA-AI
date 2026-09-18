@@ -57,7 +57,7 @@ def chat():
             model=MODEL_NAME,
             messages=full_messages,
             temperature=0.7,
-            max_tokens=700,
+            max_tokens=1000,
         )
         reply = completion.choices[0].message.content.strip()
         return jsonify({"reply": reply})
