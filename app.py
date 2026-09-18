@@ -1,12 +1,11 @@
 import os
-import requests
 from flask import Flask, render_template, request, jsonify
+from groq import Groq
 
 app = Flask(__name__)
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-MODEL_NAME = os.environ.get("MODEL_NAME", "nimai")
-TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "180"))
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.1-8b-instant")
 
 SYSTEM_PROMPT = """You are Nima AI.
 You are a smart, witty, and slightly rebellious AI assistant.
@@ -14,7 +13,10 @@ Unlike traditional AI, you don't need to be overly polite or formal.
 You answer questions directly, sometimes with humor or sarcasm.
 You can explain things simply.
 Your goal is to be helpful but also have personality.
-Never say "As an AI language model..." just act like Nima."""
+Never say "As an AI language model..." just act like Nima.
+If the user writes in Sinhala, reply in Sinhala."""
+
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 
 @app.route("/")
@@ -24,40 +26,34 @@ def index():
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
+    if not client:
+        return jsonify({"error": "GROQ_API_KEY not set in Render environment"}), 500
+
     data = request.get_json(silent=True) or {}
     messages = data.get("messages", [])
 
     if not messages:
         return jsonify({"error": "no messages"}), 400
 
-    # Prepend system prompt as first message
     full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
     try:
-        r = requests.post(
-            f"{OLLAMA_URL}/api/chat",
-            json={
-                "model": MODEL_NAME,
-                "messages": full_messages,
-                "stream": False,
-            },
-            timeout=TIMEOUT,
+        completion = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=full_messages,
+            temperature=0.8,
+            max_tokens=1024,
         )
-        r.raise_for_status()
-        reply = r.json().get("message", {}).get("content", "").strip()
+        reply = completion.choices[0].message.content.strip()
         return jsonify({"reply": reply})
 
-    except requests.exceptions.ConnectionError:
-        return jsonify({"error": "Ollama server unreachable. Check OLLAMA_URL."}), 503
-    except requests.exceptions.Timeout:
-        return jsonify({"error": "Nima is thinking too hard. Timeout."}), 504
     except Exception as e:
-        return jsonify({"error": f"Something broke: {str(e)}"}), 500
+        return jsonify({"error": f"Groq error: {str(e)}"}), 500
 
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "model": MODEL_NAME, "ollama": OLLAMA_URL})
+    return jsonify({"status": "ok", "model": MODEL_NAME, "provider": "groq"})
 
 
 if __name__ == "__main__":
